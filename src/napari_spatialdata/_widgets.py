@@ -183,7 +183,11 @@ class AListWidget(ListWidget):
             # we create a layer saying that it is in the current coordinate system, in this way we can show/hide it when
             # we select a coordinate system with the widget
             assert self._current_coordinate_system is not None
-            properties["metadata"]["coordinate_systems"] = [self._current_coordinate_system]
+            properties["metadata"]["coordinate_systems"] = layer.metadata["coordinate_systems"]
+            properties["metadata"]["adata"] = layer.metadata["adata"]
+            properties["metadata"]["sdata"] = layer.metadata["sdata"]
+            properties["metadata"]["element"] = layer.metadata["element"]
+            properties["metadata"]["library_id"] = layer.metadata["library_id"]
 
             # properties must be in the correct order
             for k, v in properties.items():

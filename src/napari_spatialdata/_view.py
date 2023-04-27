@@ -2,11 +2,12 @@ from typing import Any, Optional, Sequence, FrozenSet
 
 from loguru import logger
 from anndata import AnnData
+from geopandas import GeoDataFrame
 from napari.layers import Layer, Labels
 from napari.viewer import Viewer
 from qtpy.QtWidgets import QLabel, QWidget, QComboBox, QVBoxLayout
-from geopandas import GeoDataFrame
 from shapely.geometry import Polygon
+from napari.utils.notifications import show_info
 import numpy as np
 import napari
 import pandas as pd
@@ -25,11 +26,8 @@ from napari_spatialdata._widgets import (
     CoordinateSystemSelector,
 )
 from napari_spatialdata._constants._pkg_constants import Key
-from napari.utils.notifications import show_info
 
 __all__ = ["QtAdataViewWidget"]
-
-import spatialdata.models
 
 
 class QtAdataViewWidget(QWidget):
@@ -66,10 +64,9 @@ class QtAdataViewWidget(QWidget):
         layer_names = [layer.name for layer in layers]
         self._layer_selection_widget.addItems(layer_names)
         self.layout().addWidget(self._layer_selection_widget)
-        self._viewer.layers.selection.events.changed.connect(self._layer_selection_changed)
         self._layer_selection_widget.currentTextChanged.connect(self._select_layer)
+        self._viewer.layers.selection.events.active.connect(self._layer_selection_active)
         self._layer_selection_widget.currentTextChanged.emit(self._layer_selection_widget.currentText())
-        self._viewer.layers.events.connect(self._update_visibility)
         # self._viewer.layers.vis
 
         # obs
@@ -135,11 +132,13 @@ class QtAdataViewWidget(QWidget):
         self.viewer.layers.selection.events.active.connect(self.slider._onLayerChange)
 
         self.viewer.bind_key("Shift-E", self.export)
-        self.model.events.adata.connect(self._on_layer_update)
 
-    def _on_layer_update(self, event: Optional[Any] = None) -> None:
-        """When the model updates the selected layer, update the relevant widgets."""
-        logger.info("Updating layer.")
+    def _layer_selection_active(self, event: Optional[Any]) -> None:
+        if event.type != "active" or event.value is None:
+            return
+
+        self._layer_selection_widget.setCurrentText(event.value.name)
+        self._select_layer(event.value.name)
 
         self.adata_layer_widget.clear()
         self.adata_layer_widget.addItem("X", None)
@@ -148,52 +147,6 @@ class QtAdataViewWidget(QWidget):
         self.var_widget._onChange()
         self.obsm_widget._onChange()
         self.var_points_widget._onChange()
-
-    def _update_visibility(self, event: Optional[Any] = None) -> None:
-        """
-        When the visibility of a layer changes, update the relevant widgets.
-        """
-        if event.type == "visible":
-            self._layer_selection_changed(None)
-
-    def _layer_selection_changed(self, event: Optional[Any]) -> None:
-        """
-        When the napari layer selection or visibily changes, update the combobox for selecting napari layer with anndata.
-        """
-        ##
-        all_layers_with_adata = []
-        all_layers_with_adata_visible = []
-        for layer in self.viewer.layers:
-            if "adata" in layer.metadata and layer.metadata["adata"] is not None:
-                all_layers_with_adata.append(layer.name)
-                if layer.visible:
-                    all_layers_with_adata_visible.append(layer.name)
-        ##
-        all_layers_selected = [a.name for a in self.viewer.layers.selection]
-        all_layers_with_adata_selected_and_visible = [
-            layer for layer in all_layers_selected if layer in all_layers_with_adata_visible
-        ]
-        ##
-        old_current_text = self._layer_selection_widget.currentText()
-        all_items = [self._layer_selection_widget.itemText(i) for i in range(self._layer_selection_widget.count())]
-        if set(all_items) != set(all_layers_with_adata):
-            # update the values of the combobox
-            self._layer_selection_widget.clear()
-            self._layer_selection_widget.addItems(all_layers_with_adata)
-            if old_current_text in all_layers_with_adata:
-                self._layer_selection_widget.blockSignals(True)
-                self._layer_selection_widget.setCurrentText(old_current_text)
-                self._layer_selection_widget.blockSignals(False)
-        ##
-        if (
-            old_current_text not in all_layers_with_adata_selected_and_visible
-            and len(all_layers_with_adata_selected_and_visible) > 0
-        ):
-            first_selected = all_layers_with_adata_selected_and_visible[0]
-            self._layer_selection_widget.setCurrentText(first_selected)
-        elif old_current_text not in all_layers_with_adata_visible and len(all_layers_with_adata_visible) > 0:
-            first_selected = all_layers_with_adata_visible[0]
-            self._layer_selection_widget.setCurrentText(first_selected)
 
     def _get_layer_by_name(self, layer_name: str) -> Optional[Layer]:
         """Get the layer by name."""
@@ -223,7 +176,7 @@ class QtAdataViewWidget(QWidget):
             self.model.adata.obsm[Key.obsm.spatial][:, ::-1][:, :2] * self.model.scale, 0, values=0, axis=1
         )
         if "points" in layer.metadata:
-            self.model.points_coordinates = layer.metadata['points'].X
+            self.model.points_coordinates = layer.metadata["points"].X
             self.model.points_var = layer.metadata["points"].obs["gene"]
             self.model.point_diameter = np.array([0.0] + [layer.metadata["point_diameter"]] * 2) * self.model.scale
         # workaround to support different sizes for different point, for layers coming from SpatialData
@@ -271,7 +224,7 @@ class QtAdataViewWidget(QWidget):
                 if "sdata" in ll.metadata:
                     sdata = ll.metadata["sdata"]
                     sdatas.append(sdata)
-        sdata_ids = set([id(sdata) for sdata in sdatas])
+        sdata_ids = {id(sdata) for sdata in sdatas}
         if len(sdata_ids) == 0:
             raise RuntimeError(
                 "Cannot save polygons because no layer associated with a SpatialData object is " "currently visible."
@@ -281,8 +234,8 @@ class QtAdataViewWidget(QWidget):
         ##
 
         sdata = sdatas[0]
+        from spatialdata.models import PointsModel, ShapesModel
         from spatialdata.transformations.transformations import Identity
-        from spatialdata.models import ShapesModel, PointsModel
 
         # get current coordinate system
         selected = self._coordinate_system_selector.selectedItems()
@@ -305,7 +258,7 @@ class QtAdataViewWidget(QWidget):
                 assert len(set(row)) == 1
                 size = row[0]
                 sizes.append(size)
-            sizes_array = np.array(sizes) / 2
+            np.array(sizes) / 2
             # we apply the transformation that is used in the layer
             assert len(coords.shape) == 2
             p = np.vstack([coords.T, np.ones(coords.shape[0])])
@@ -321,9 +274,7 @@ class QtAdataViewWidget(QWidget):
             # coords from napari are in the yx coordinate systems, we want to store them as xy
             coords = np.fliplr(coords)
             # saving as points (drawback: radius is not saved)
-            points = PointsModel.parse(
-                coords, transformations={cs: Identity()}
-            )
+            points = PointsModel.parse(coords, transformations={cs: Identity()})
             sdata.add_points(name=zarr_name, points=points, overwrite=True)
             show_info(f"Points saved in the SpatialData object")
             # saving as shapes (drawback: if save the shapes and we load them again, we can't draw points but ellipses;
