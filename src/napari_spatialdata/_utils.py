@@ -3,14 +3,11 @@ from __future__ import annotations
 from typing import Any, Tuple, Union, Callable, Optional, Sequence, TYPE_CHECKING
 from functools import wraps
 
-from numba import njit, prange
-from loguru import logger
 from anndata import AnnData
 from scipy.sparse import issparse, spmatrix
 from scipy.spatial import KDTree
 from pandas.api.types import infer_dtype, is_categorical_dtype
 from matplotlib.colors import to_rgb, is_color_like
-from scanpy.plotting._utils import add_colors_for_categorical_sample_annotation
 from pandas.core.dtypes.common import (
     is_bool_dtype,
     is_object_dtype,
@@ -20,7 +17,6 @@ from pandas.core.dtypes.common import (
 )
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
 from napari_spatialdata._constants._pkg_constants import Key
 
@@ -74,6 +70,7 @@ def _ensure_dense_vector(fn: Callable[..., Vector_name_t]) -> Callable[..., Vect
 
     return decorator
 
+
 # patch from marcella
 def _set_palette(
     adata: AnnData,
@@ -102,7 +99,6 @@ def _get_categorical(
     palette: Optional[str] = None,
     vec: Union[pd.Series, dict[Any, Any], None] = None,
 ) -> NDArrayA:
-
     if not isinstance(vec, dict):
         col_dict = _set_palette(adata, key, palette, vec)
     else:
@@ -116,29 +112,6 @@ def _get_categorical(
                 raise ValueError(f"`{vec[cat]}` is not an acceptable color.")
 
     return np.array([col_dict[v] for v in adata.obs[key]])
-
-# def _get_categorical(
-#     adata: AnnData,
-#     key: str,
-#     palette: Optional[str] = None,
-#     vec: Optional[pd.Series] = None,
-# ) -> NDArrayA:
-#
-#     if vec is not None:
-#         if not is_categorical_dtype(vec):
-#             vec = vec.astype("category")
-#             # raise TypeError(f"Expected a `categorical` type, found `{infer_dtype(vec)}`.")
-#         if key in adata.obs:
-#             logger.debug(f"Overwriting `adata.obs[{key!r}]`.")
-#
-#         adata.obs[key] = vec.values
-#
-#     add_colors_for_categorical_sample_annotation(
-#         adata, key=key, force_update_colors=palette is not None, palette=palette
-#     )
-#     col_dict = dict(zip(adata.obs[key].cat.categories, [to_rgb(i) for i in adata.uns[Key.uns.colors(key)]]))
-#
-#     return np.array([col_dict[v] for v in adata.obs[key]])
 
 
 def _position_cluster_labels(coords: NDArrayA, clusters: pd.Series, colors: NDArrayA) -> dict[str, NDArrayA]:
@@ -165,9 +138,7 @@ def _position_cluster_labels(coords: NDArrayA, clusters: pd.Series, colors: NDAr
     return {"clusters": clusters}
 
 
-
 def _min_max_norm(vec: Union[spmatrix, NDArrayA]) -> NDArrayA:
-
     if issparse(vec):
         if TYPE_CHECKING:
             assert isinstance(vec, spmatrix)
@@ -181,91 +152,6 @@ def _min_max_norm(vec: Union[spmatrix, NDArrayA]) -> NDArrayA:
     return (  # type: ignore[no-any-return]
         np.ones_like(vec) if np.isclose(minn, maxx) else ((vec - minn) / (maxx - minn))
     )
-
-
-@njit(cache=True, fastmath=True)
-def _point_inside_triangles(triangles: NDArrayA) -> np.bool_:
-    # modified from napari
-    AB = triangles[:, 1, :] - triangles[:, 0, :]
-    AC = triangles[:, 2, :] - triangles[:, 0, :]
-    BC = triangles[:, 2, :] - triangles[:, 1, :]
-
-    s_AB = -AB[:, 0] * triangles[:, 0, 1] + AB[:, 1] * triangles[:, 0, 0] >= 0
-    s_AC = -AC[:, 0] * triangles[:, 0, 1] + AC[:, 1] * triangles[:, 0, 0] >= 0
-    s_BC = -BC[:, 0] * triangles[:, 1, 1] + BC[:, 1] * triangles[:, 1, 0] >= 0
-
-    return np.any((s_AB != s_AC) & (s_AB == s_BC))
-
-
-@njit(parallel=True)
-def _points_inside_triangles(points: NDArrayA, triangles: NDArrayA) -> NDArrayA:
-    out = np.empty(  # type: ignore[var-annotated]
-        len(
-            points,
-        ),
-        dtype=np.bool_,
-    )
-    for i in prange(len(out)):
-        out[i] = _point_inside_triangles(triangles - points[i])
-
-    return out
-
-
-def save_fig(fig: Figure, path: str | Path, make_dir: bool = True, ext: str = "png", **kwargs: Any) -> None:
-    """
-    Save a figure.
-
-    Parameters
-    ----------
-    fig
-        Figure to save.
-    path
-        Path where to save the figure. If path is relative, save it under :attr:`scanpy.settings.figdir`.
-    make_dir
-        Whether to try making the directory if it does not exist.
-    ext
-        Extension to use if none is provided.
-    kwargs
-        Keyword arguments for :meth:`matplotlib.figure.Figure.savefig`.
-
-    Returns
-    -------
-    None
-        Just saves the plot.
-    """
-    if os.path.splitext(path)[1] == "":
-        path = f"{path}.{ext}"
-
-    path = Path(path)
-
-    # to avoid the dependency from scanpy
-    # if not path.is_absolute():
-    #     path = Path(settings.figdir) / path
-
-    if make_dir:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        except OSError as e:
-            logger.debug(f"Unable to create directory `{path.parent}`. Reason: `{e}`")
-
-    logger.debug(f"Saving figure to `{path!r}`")
-
-    kwargs.setdefault("bbox_inches", "tight")
-    kwargs.setdefault("transparent", True)
-
-    fig.savefig(path, **kwargs)
-
-
-def _display_channelwise(arr: NDArrayA | da.Array) -> bool:
-    n_channels: int = arr.shape[-1]
-    if n_channels not in (3, 4):
-        return n_channels != 1
-    if np.issubdtype(arr.dtype, np.uint8):
-        return False  # assume RGB(A)
-    if not np.issubdtype(arr.dtype, np.floating):
-        return True
-
-    return _not_in_01(arr)
 
 
 def _get_ellipses_from_circles(centroids: NDArrayA, radii: NDArrayA) -> NDArrayA:

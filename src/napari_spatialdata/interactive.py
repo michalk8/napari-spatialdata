@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Optional, Union, Tuple
 import napari
 from loguru import logger
-from napari_spatialdata._utils import save_fig, NDArrayA, _get_ellipses_from_circles
+from napari_spatialdata._utils import NDArrayA, _get_ellipses_from_circles
 import numpy as np
 from napari_spatialdata._constants._pkg_constants import Key
 from skimage.measure import regionprops
@@ -579,51 +579,6 @@ class Interactive:
                         )
                 else:
                     raise ValueError(f"Unsupported element type: {type(element)}")
-
-    def screenshot(
-        self,
-        return_result: bool = False,
-        dpi: float | None = 180,
-        save: str | None = None,
-        canvas_only: bool = True,
-        **kwargs: Any,
-    ) -> NDArrayA | None:
-        """
-        Plot a screenshot of the viewer's canvas.
-
-        Parameters
-        ----------
-        return_result
-            If `True`, return the image as an :class:`numpy.uint8`.
-        dpi
-            Dots per inch.
-        save
-            Whether to save the plot.
-        canvas_only
-            Whether to show only the canvas or also the widgets.
-        kwargs
-            Keyword arguments for :meth:`matplotlib.axes.Axes.imshow`.
-
-        Returns
-        -------
-        Nothing, if ``return_result = False``, otherwise the image array.
-        """
-        try:
-            arr = np.asarray(self._viewer.screenshot(path=None, canvas_only=canvas_only))
-        except RuntimeError as e:
-            logger.error(f"Unable to take a screenshot. Reason: {e}")
-            return None
-
-        fig, ax = plt.subplots(nrows=1, ncols=1, dpi=dpi)
-        fig.tight_layout()
-
-        ax.imshow(arr, **kwargs)
-        plt.axis("off")
-
-        if save is not None:
-            save_fig(fig, save)
-
-        return arr if return_result else None
 
     def close(self) -> None:
         """Close the viewer."""
