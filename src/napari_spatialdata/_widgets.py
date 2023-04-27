@@ -1,37 +1,35 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import Any, Union, Iterable, Optional, TYPE_CHECKING
+from typing import Any, List, Union, Iterable, Optional, TYPE_CHECKING
 from functools import singledispatchmethod
-from pandas.api.types import infer_dtype, is_categorical_dtype
 
-from dask.dataframe.core import DataFrame as DaskDataFrame
 from qtpy import QtCore, QtWidgets
 from vispy import scene
 from loguru import logger
+from anndata import AnnData
 from superqt import QRangeSlider
+from geopandas import GeoDataFrame
 from qtpy.QtCore import Qt, Signal
-from napari.layers import Image, Layer, Labels, Points, Shapes
+from napari.layers import Layer, Labels, Points
 from napari.viewer import Viewer
+from pandas.api.types import is_categorical_dtype
 from vispy.scene.widgets import ColorBarWidget
 from vispy.color.colormap import Colormap, MatplotlibColormap
 from sklearn.preprocessing import MinMaxScaler
-from anndata import AnnData
-import scipy.sparse
 import numpy as np
 import napari
 import pandas as pd
+import scipy.sparse
 import matplotlib.pyplot as plt
-from geopandas import GeoDataFrame
 
 from napari_spatialdata._model import ImageModel
 from napari_spatialdata._utils import (
     NDArrayA,
+    _set_palette,
     _min_max_norm,
     _get_categorical,
-    _set_palette,
     _position_cluster_labels,
-    _get_ellipses_from_circles,
 )
 
 __all__ = ["AListWidget", "CBarWidget", "RangeSliderWidget", "ObsmIndexWidget", "CBarWidget"]
@@ -117,7 +115,7 @@ class AListWidget(ListWidget):
         if self.model.adata is not None:
             self._onChange()
 
-    def _coordinateSystemChanged(self, new_coordinate_system: str):
+    def _coordinateSystemChanged(self, new_coordinate_system: str) -> None:
         self._current_coordinate_system = new_coordinate_system
 
     def _onChange(self) -> None:
@@ -159,7 +157,7 @@ class AListWidget(ListWidget):
                 continue
             # try:
             #     vec, name = self._getter(item, index=self.getIndex())
-            # except Exception as e:  # noqa: B902
+            # except Exception as e:
             #     logger.error(e)
             #     continue
             # if vec.ndim == 2:
@@ -180,72 +178,20 @@ class AListWidget(ListWidget):
             if adata is not None:
                 kwargs = {"adata": adata}
             properties = self._get_points_properties(vec, key=item, layer=layer, **kwargs)
-            if 'metadata' not in properties or properties['metadata'] is None:
-                properties['metadata'] = {}
+            if "metadata" not in properties or properties["metadata"] is None:
+                properties["metadata"] = {}
             # we create a layer saying that it is in the current coordinate system, in this way we can show/hide it when
             # we select a coordinate system with the widget
             assert self._current_coordinate_system is not None
-            properties['metadata']['coordinate_systems'] = [self._current_coordinate_system]
-            if isinstance(layer, Points):
-                if isinstance(layer.metadata['element'], GeoDataFrame):
-                    diameter = layer.metadata["element"]["radius"].to_numpy() * 2
-                elif isinstance(layer.metadata['element'], DaskDataFrame):
-                    diameter = layer.size
-                else:
-                    raise TypeError(f"Unsupported type {type(layer.metadata['element'])} for layer {layer.name}.")
-                ##
-                self.viewer.add_points(
-                    layer.data,
-                    # self.model.coordinates,
-                    name=name,
-                    size=diameter,
-                    # size=self.model.spot_diameter,
-                    opacity=1,
-                    face_colormap=self.model.cmap,
-                    edge_colormap=self.model.cmap,
-                    edge_width=0.0,
-                    symbol=self.model.symbol,
-                    affine=layer.affine,
-                    **properties,
-                )
-                ##
-            elif isinstance(layer, Labels):
-                # TODO: fix this workaround; do we need to copy?
-                pass
-                self.viewer.add_labels(
-                    layer.data.copy()
-                    if not isinstance(layer.data, napari.layers._multiscale_data.MultiScaleData)
-                    else layer.data,
-                    # self.model.layer.data.copy()
-                    # if not isinstance(self.model.layer.data, napari.layers._multiscale_data.MultiScaleData)
-                    # else self.model.layer.data,
-                    name=name,
-                    affine=layer.affine,
-                    **properties,
-                )
-            elif isinstance(layer, Shapes):
-                # 3d case not supported for the moment
-                # coordinates_2d = self.model.coordinates[:, 1:]
-                # ellipses = _get_ellipses_from_circles(centroids=coordinates_2d, radii=self.model.spot_diameter / 2)
-                self._viewer.add_shapes(
-                    layer.data.copy(),
-                    # ellipses,
-                    shape_type="ellipse",
-                    name=name,
-                    opacity=1,
-                    face_colormap=self.model.cmap,
-                    # edge_colormap doesn't seem to work, the color is gray
-                    edge_colormap=self.model.cmap,
-                    edge_width=0.0,
-                    affine=layer.affine,
-                    **properties,
-                )
-                pass
-            # else:
-            #     raise ValueError("TODO")
-            # TODO(michalk8): add contrasting fg/bg color once https://github.com/napari/napari/issues/2019 is done
-            # TODO(giovp): make layer editable?
-            # self.viewer.layers[layer_name].editable = False
+            properties["metadata"]["coordinate_systems"] = [self._current_coordinate_system]
+
+            # properties must be in the correct order
+            for k, v in properties.items():
+                setattr(layer, k, v)
+
+            # TODO: check if this isn necessary
+            if isinstance(layer, Points) and isinstance(layer.metadata.get("element", None), GeoDataFrame):
+                layer.size = layer.metadata["element"]["radius"].to_numpy() * 2
 
     def setAdataLayer(self, layer: Optional[str]) -> None:
         if layer in ("default", "None", "X"):
@@ -293,14 +239,14 @@ class AListWidget(ListWidget):
             norm_vec = _min_max_norm(vec)
             color_vec = cmap(norm_vec)
             return {
-                "color": {k: v for k, v in zip(adata.obs[self.model.labels_key].values, color_vec)},
                 "properties": {"value": vec},
+                "color": {k: v for k, v in zip(adata.obs[self.model.labels_key].values, color_vec)},
                 "metadata": {"perc": (0, 100), "data": vec, "minmax": (np.nanmin(vec), np.nanmax(vec))},
             }
         return {
             "text": None,
-            "face_color": "value",
             "properties": {"value": vec},
+            "face_color": "value",
             "metadata": {"perc": (0, 100), "data": vec, "minmax": (np.nanmin(vec), np.nanmax(vec))},
         }
 
@@ -505,7 +451,7 @@ class RangeSliderWidget(QRangeSlider):
         if "data" not in layer.metadata:
             return None
         v = layer.metadata["data"]
-        clipped = np.clip(v, *np.percentile(v, percentile))  # type: ignore[misc]
+        clipped = np.clip(v, *np.percentile(v, percentile))
 
         if isinstance(layer, Points):
             layer.metadata = {**layer.metadata, "perc": percentile}
@@ -535,11 +481,12 @@ class RangeSliderWidget(QRangeSlider):
         scaler = MinMaxScaler(feature_range=(minn, maxx))
         return scaler.fit_transform(vec.reshape(-1, 1))
 
+
 class CoordinateSystemSelector(ListWidget):
     def __init__(self, viewer: Viewer, **kwargs: Any):
         super().__init__(viewer, **kwargs)
         self.viewer = viewer
-        self.coordinate_systems = []
+        self.coordinate_systems: List[str] = []
         for layer in self.viewer.layers:
             metadata = layer.metadata
             if "coordinate_systems" in metadata:
@@ -548,7 +495,7 @@ class CoordinateSystemSelector(ListWidget):
                     if cs not in self.coordinate_systems:
                         self.coordinate_systems.append(cs)
         self._create_ui()
-        self._current_coordinate_system = None
+        self._current_coordinate_system: Optional[str] = None
 
     def _create_ui(self) -> None:
         self.addItems(self.coordinate_systems)
