@@ -10,14 +10,9 @@ from shapely.geometry import Polygon
 from napari.utils.notifications import show_info
 import numpy as np
 import napari
-import pandas as pd
 
 from napari_spatialdata._model import ImageModel
-from napari_spatialdata._utils import (
-    NDArrayA,
-    _get_categorical,
-    _points_inside_triangles,
-)
+from napari_spatialdata._utils import _get_categorical
 from napari_spatialdata._widgets import (
     CBarWidget,
     AListWidget,
@@ -303,18 +298,6 @@ class QtAdataViewWidget(QWidget):
             show_info(f"Polygons saved in the SpatialData object")
         else:
             show_info("You can only save a layer of type points or polygons.")
-
-    def _save_shapes(self, layer: napari.layers.Shapes, key: str) -> None:
-        shape_list = layer._data_view
-        triangles = shape_list._mesh.vertices[shape_list._mesh.displayed_triangles]
-
-        # TODO(giovp): check if view and save accordingly
-        points_mask: NDArrayA = _points_inside_triangles(self.model.coordinates[:, 1:], triangles)
-
-        logger.info("Saving layer shapes.")
-
-        self._model._adata.obs[key] = pd.Categorical(points_mask)
-        self._model._adata.uns[key] = {"meshes": layer.data.copy()}
 
     def _update_obs_items(self, key: str) -> None:
         self.obs_widget.addItems(key)

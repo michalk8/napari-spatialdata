@@ -1,28 +1,33 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Union, Tuple
-import napari
+from typing import Tuple, Union, Optional
+
 from loguru import logger
-from napari_spatialdata._utils import NDArrayA, _get_ellipses_from_circles
-import numpy as np
-from napari_spatialdata._constants._pkg_constants import Key
-from skimage.measure import regionprops
-import pandas as pd
-from dask.dataframe.core import DataFrame as DaskDataFrame
 from xarray import DataArray
 from anndata import AnnData
-from spatial_image import SpatialImage
-from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialImage
+from shapely import Point, Polygon, MultiPolygon
+from datatree import DataTree
 from geopandas import GeoDataFrame
 from spatialdata import SpatialData
-from spatialdata.transformations import get_transformation
-from spatialdata.models import get_axes_names
-from spatialdata.models import get_model, Image3DModel, Labels3DModel, SpatialElement
-from datatree import DataTree
+from spatial_image import SpatialImage
+from skimage.measure import regionprops
 from pandas.api.types import is_categorical_dtype
-from shapely import Polygon, MultiPolygon, Point
+from spatialdata.models import (
+    get_model,
+    Image3DModel,
+    Labels3DModel,
+    get_axes_names,
+    SpatialElement,
+)
+from dask.dataframe.core import DataFrame as DaskDataFrame
+from spatialdata.transformations import get_transformation
+from multiscale_spatial_image.multiscale_spatial_image import MultiscaleSpatialImage
+import numpy as np
+import napari
+import pandas as pd
 
-import matplotlib.pyplot as plt
+from napari_spatialdata._utils import _get_ellipses_from_circles
+from napari_spatialdata._constants._pkg_constants import Key
 
 __all__ = ["Interactive", "_get_transform"]
 
@@ -40,7 +45,7 @@ def _get_transform(element: SpatialElement, coordinate_system_name: Optional[str
     if isinstance(element, SpatialImage) or isinstance(element, MultiscaleSpatialImage):
         return affine
     elif isinstance(element, AnnData) or isinstance(element, DaskDataFrame) or isinstance(element, GeoDataFrame):
-        from spatialdata.transformations import Affine, Sequence, MapAxis
+        from spatialdata.transformations import Affine, MapAxis, Sequence
 
         # old code, I just noticed it was wrong by reading it... but things were being displayed correctly. Luck?
         # new_affine = Sequence(
@@ -92,7 +97,7 @@ class Interactive:
 
     def show_widget(self):
         """Load the widget for interative features exploration."""
-        from napari.plugins import plugin_manager, _npe2
+        from napari.plugins import _npe2, plugin_manager
 
         plugin_manager.discover_widgets()
         _npe2.get_widget_contribution("napari-spatialdata")
@@ -489,7 +494,9 @@ class Interactive:
             if annotated_instances.issuperset(available_instances):
                 pass
             else:
-                raise ValueError("Partial annotation is support only when the annotation table contains instances not in circles.")
+                raise ValueError(
+                    "Partial annotation is support only when the annotation table contains instances not in circles."
+                )
 
         # this is to reorder the circles to match the order of the annotation table
         a = annotating_rows.obs[instance_key].to_numpy()
@@ -537,7 +544,7 @@ class Interactive:
         # colors are consistent
         if adata is not None:
             for key in adata.obs.keys():
-                if is_categorical_dtype(adata.obs[key]) and f'{key}_colors' not in adata.uns:
+                if is_categorical_dtype(adata.obs[key]) and f"{key}_colors" not in adata.uns:
                     _set_colors_for_categorical_obs(adata, key, palette="tab20")
 
     def _add_layers_from_sdata(
@@ -570,7 +577,10 @@ class Interactive:
                             logger.warning("3D labels are not supported yet. Skipping.")
                         else:
                             self._add_labels(
-                                sdata=sdata, labels=element, annotation_table=annotation_table, element_path=element_path
+                                sdata=sdata,
+                                labels=element,
+                                annotation_table=annotation_table,
+                                element_path=element_path,
                             )
                 elif prefix == "shapes":
                     if shapes:
